@@ -1,0 +1,13 @@
+rule test_yar
+{
+    meta:
+        author      = "segfo"
+        date        = "2018/05/15"
+        description = "sample"
+    strings:
+        $a = "AAAAAAAAAAAABBBBBBBBBBBBCCCCCCCCC"
+        $b = "abcdefghijk"
+        $c = "main" nocase
+    condition:
+        any of them
+}

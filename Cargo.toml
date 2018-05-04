@@ -1,0 +1,8 @@
+[package]
+name = "yarust"
+version = "0.1.0"
+authors = ["segfo <k.segfo@gmail.com>"]
+build = "build.rs"
+
+[dependencies]
+libc = "0.2"
