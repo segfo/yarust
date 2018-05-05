@@ -1,14 +1,37 @@
-rule test_yar
+rule ascii_string
 {
     meta:
         author      = "segfo"
         date        = "2018/05/15"
         description = "sample"
     strings:
-        $a = "AAAAAAAAAAAABBBBBBBBBBBBCCCCCCCCC"
-        $b = "abcdefghijk"
-        $c = "main" nocase
-        $d = " crate" nocase
+        $dumnn = "AAAAAAAAAAAABBBBBBBBBBBBCCCCCCCCC"
+        $abc = "abcdefghijk"
+        $main = "main" nocase
+        $crate = " crate" nocase
+    condition:
+        any of them
+}
+
+rule sjis
+{
+    meta:
+        author      = "segfo"
+        date        = "2018/05/15"
+        description = "sample"
+    strings:
+        $scan = {83 58 83 4C 83 83 83 93}
+    condition:
+        any of them
+}
+rule utf8
+{
+    meta:
+        author      = "segfo"
+        date        = "2018/05/15"
+        description = "sample"
+    strings:
+        $scan = {E3 82 B9 E3 82 AD E3 83 A3 E3 83 B3}
     condition:
         any of them
 }

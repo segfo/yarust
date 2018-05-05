@@ -89,24 +89,32 @@ fn main() {
     }
 }
 
+fn u8ptr_to_vec(s:*mut u8,s_len:usize)->Vec<u8>{
+    let mut tmp = Vec::new();
+    for i in 0..s_len{
+        unsafe{
+            tmp.push(*(s.offset(i as isize)));
+        }
+    }
+    tmp
+}
+
 // 一致した際に呼ばれるコールバックメソッド
-fn callback_matching(yara:*mut YARA_FFI,address:usize,datalength:usize,rule_id_string:*mut u8,ruleid_len:usize)->libc::c_int{
-    let mut rule_id = Vec::new();
+fn callback_matching(yara:*mut YARA_FFI,address:usize,datalength:usize,rule_id_string:*mut u8,ruleid_len:usize,cond_string_id_string:*mut u8,condstringid_len:usize)->libc::c_int{
+    
     let data = unsafe{&(*(*yara).user_data)};
     let rulefile = data.rule_file.clone().unwrap();
     let target = data.target_file.clone().unwrap();
-    for i in 0..ruleid_len{
-        unsafe{
-            rule_id.push(*(rule_id_string.offset(i as isize)));
-        }
-    }
+    let rule_id = u8ptr_to_vec(rule_id_string,ruleid_len);
     let rule_id = std::str::from_utf8(&rule_id).unwrap();
-    print_result(data,&rulefile,&target,address,datalength,rule_id);
+    let cond_string_id = u8ptr_to_vec(cond_string_id_string,condstringid_len);
+    let cond_string_id = std::str::from_utf8(&cond_string_id).unwrap();
+    print_result(data,&rulefile,&target,address,datalength,rule_id,cond_string_id);
     return 0;
 }
 
 // 一致したデータの該当部分周辺と該当箇所を表示するメソッド
-fn print_result(user_data:&YARA_DATA,rule_file:&str,target_name:&str,address:usize,data_length:usize,rule_id:&str){
+fn print_result(user_data:&YARA_DATA,rule_file:&str,target_name:&str,address:usize,data_length:usize,rule_id:&str,cond_string_id:&str){
     let mut target = File::open(target_name).unwrap();
     let mut offset = 0;
     let diff;
@@ -120,9 +128,9 @@ fn print_result(user_data:&YARA_DATA,rule_file:&str,target_name:&str,address:usi
     let mut buf = Vec::new();
     let _=(&target).take((user_data.scope_width*2+data_length) as u64).read_to_end(&mut buf).unwrap();
     
-    println!("[ルールファイル: {}(ルールID : {})] ===> [探索対象ファイル: {}(オフセット(開始 - 終了): 0x{:x} - 0x{:x} = {} バイトにマッチ)]",
-    //println!("[Rule file: {} (Rule ID: {})] ===> [Search target file: {} (offset (start - end): 0x {:x} - 0x {:x} = {} bytes)]",
-        rule_file,rule_id,target_name,address,address+data_length,data_length);
+    println!("[ルールファイル: {}(ルールID : {}/{})] ===> [探索対象ファイル: {}(オフセット(開始 - 終了): 0x{:x} - 0x{:x} = {} バイトにマッチ)]",
+    //println!("[Rule file: {} (Rule ID: {}/{})] ===> [Search target file: {} (offset (start - end): 0x {:x} - 0x {:x} = {} bytes)]",
+        rule_file,rule_id,cond_string_id,target_name,address,address+data_length,data_length);
     print_buffer(&buf[0..diff]);
     match ConsoleColor::new(){
         Ok(mut con)=>{

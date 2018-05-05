@@ -14,7 +14,9 @@
 typedef struct YARA_FFI{
     YR_COMPILER*    compiler;
     YR_RULES*   rules;
-    int (*callback_matching)(struct YARA_FFI* user_data,size_t address,size_t datalength,uint8_t* rule_id_string,size_t ruleid_len);
+    int (*callback_matching)(struct YARA_FFI* user_data,size_t address,size_t datalength,
+                            uint8_t* rule_id_string,size_t ruleid_len,
+                            uint8_t* string_id_string,size_t stringid_len);
     int (*callback_not_matching)(struct YARA_FFI* user_data,uint8_t* rule_id_string);
     void* user_data;
 }YARA_FFI;
@@ -75,7 +77,9 @@ int proc_match(YR_RULE* rule,YARA_FFI* yara){
                 match->base + match->offset,
                 match->data_length,
                 yrstr->identifier);
-            yara->callback_matching(yara,match->base + match->offset,match->data_length,yrstr->identifier,strlen(yrstr->identifier));
+            yara->callback_matching(yara,match->base + match->offset,match->data_length,
+                rule->identifier,strlen(rule->identifier),
+                yrstr->identifier,strlen(yrstr->identifier));
         }
     }
     PRINT_DEBUG(" + namespace : %s\n",rule->ns->name);

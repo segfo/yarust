@@ -24,7 +24,7 @@ extern {
         target_file:* const libc::c_char,
         flags:libc::c_int,
         timeout:libc::c_int)->libc::c_int;
-    fn ffi_set_callback_match(yara:*mut YARA_FFI,cb:fn(*mut YARA_FFI, usize, usize, *mut u8,usize) -> i32);
+    fn ffi_set_callback_match(yara:*mut YARA_FFI,cb:fn(*mut YARA_FFI, usize, usize, *mut u8,usize, *mut u8,usize) -> i32);
     fn ffi_finalize_thread();
 }
 
@@ -101,7 +101,7 @@ impl YARA_SCANNER{
         Ok(())
     }
 
-    pub fn set_callback_match(&self,cb:fn(*mut YARA_FFI,usize,usize,*mut u8,usize)->libc::c_int){
+    pub fn set_callback_match(&self,cb:fn(*mut YARA_FFI,usize,usize,*mut u8,usize,*mut u8,usize)->libc::c_int){
         unsafe{ffi_set_callback_match(self.yara,cb);}
     }
 }

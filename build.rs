@@ -7,7 +7,7 @@ fn main() {
 
     // note that there are a number of downsides to this approach, the comments
     // below detail how to improve the portability of these commands.
-    let srcs=["ffi_main.c","null_handlers.c"];
+    let srcs=["ffi_main.c"];
     let lib_name="myffi";
     let extern_lib=["yara"];
     let ffi_base="src/ffi/";
