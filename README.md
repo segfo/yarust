@@ -1,15 +1,16 @@
 # これはなに？
-libyaraを使ってバイナリGrepできるツール
-対応OSはWindowsのみ。（将来的にはLinuxもやりたい予定）
-マルチスレッド非対応（将来的には(ｒｙ）
-
-使い方
-
-yarust.exe --rule rule.yr --path ./
-
-こうすると、rule.yrに従ってディレクトリまたはファイルをスキャンして、一致した箇所を出してくれる
-バイナリ、ログファイルやDBファイルの調査に使えるかも。
-
+libyaraを使ってバイナリGrepできるツール  
+対応OSはWindowsのみ。（将来的にはLinuxもやりたい予定）  
+マルチスレッド非対応（将来的には(ｒｙ）  
+[ルールを定義して使ってみたQiita](https://qiita.com/segfo/items/ea0af9ffefc862a91152)  
+  
+## 使い方  
+  
+`yarust.exe --rule rule.yr --path ./`  
+  
+こうすると、rule.yrに従ってディレクトリまたはファイルをスキャンして、一致した箇所を出してくれる  
+バイナリ、ログファイルやDBファイルの調査に使えるかも。  
+  
 # スクリーンショット
 ![スクリーンショット](img/screenshot.png)
 
