@@ -101,14 +101,15 @@ fn u8ptr_to_vec(s:*mut u8,s_len:usize)->Vec<u8>{
 
 // 一致した際に呼ばれるコールバックメソッド
 fn callback_matching(yara:*mut YARA_FFI,address:usize,datalength:usize,rule_id_string:*mut u8,ruleid_len:usize,cond_string_id_string:*mut u8,condstringid_len:usize)->libc::c_int{
-    
     let data = unsafe{&(*(*yara).user_data)};
     let rulefile = data.rule_file.clone().unwrap();
     let target = data.target_file.clone().unwrap();
+
     let rule_id = u8ptr_to_vec(rule_id_string,ruleid_len);
     let rule_id = std::str::from_utf8(&rule_id).unwrap();
     let cond_string_id = u8ptr_to_vec(cond_string_id_string,condstringid_len);
     let cond_string_id = std::str::from_utf8(&cond_string_id).unwrap();
+    
     print_result(data,&rulefile,&target,address,datalength,rule_id,cond_string_id);
     return 0;
 }

@@ -1,5 +1,5 @@
 # これはなに？
-libyaraを使ってバイナリGrepできるツール  
+[libyara](https://github.com/VirusTotal/yara/)を使ってバイナリGrepできるツール  
 対応OSはWindowsのみ。（将来的にはLinuxもやりたい予定）  
 マルチスレッド非対応（将来的には(ｒｙ）  
 [ルールを定義して使ってみたQiita](https://qiita.com/segfo/items/ea0af9ffefc862a91152)  
