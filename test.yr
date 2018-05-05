@@ -8,6 +8,7 @@ rule test_yar
         $a = "AAAAAAAAAAAABBBBBBBBBBBBCCCCCCCCC"
         $b = "abcdefghijk"
         $c = "main" nocase
+        $d = " crate" nocase
     condition:
         any of them
 }
