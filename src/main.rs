@@ -18,12 +18,14 @@ fn init<'a>()->ArgMatches<'a>{
         .long("path")
         .short("p")
         .required(true)
-        .takes_value(true))
+        .takes_value(true)
+        .help("Specify the path of the search target file or directory"))
     .arg(Arg::with_name("rule_file")
         .long("rule")
         .short("r")
         .required(true)
-        .takes_value(true))
+        .takes_value(true)
+        .help("Specify file path of YARA rule"))
     .arg(Arg::with_name("scope_width")
         .long("width")
         .short("w")
@@ -32,7 +34,8 @@ fn init<'a>()->ArgMatches<'a>{
             }else{
                 Ok(())
             })
-        .takes_value(true))
+        .takes_value(true)
+        .help("Specify an arbitrary number of bytes before and after display from the matching part (default 20 bytes)"))
     .get_matches()
 }
 
