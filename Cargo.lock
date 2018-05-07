@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "yarust"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "clap 2.31.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "libc 0.2.37 (registry+https://github.com/rust-lang/crates.io-index)",

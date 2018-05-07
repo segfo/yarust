@@ -3,6 +3,7 @@ use libc;
 use libc::*;
 use std::error::Error;
 use std::ffi::*;
+use std::io::Write;
 
 #[derive(Debug)]
 #[repr(C)]
@@ -28,12 +29,19 @@ extern {
     fn ffi_finalize_thread();
 }
 
-#[derive(Debug)]
 #[repr(C)]
 pub struct YARA_DATA{
     pub rule_file:Option<String>,
     pub target_file:Option<String>,
     pub scope_width:usize,
+    pub out:Box<Write>
+}
+use std::fmt::Formatter;
+use std::fmt::Debug;
+impl Debug for YARA_DATA{
+    fn fmt(&self,f:&mut Formatter)->Result<(),std::fmt::Error>{
+        write!(f,"{:?} {:?} {}",self.rule_file,self.target_file,self.scope_width)
+    }
 }
 
 #[derive(Debug)]
@@ -54,13 +62,13 @@ impl YARA{
         }
         YARA{}
     }
-    pub fn get_scanner_instance(&self)->Box<YARA_SCANNER>{
-        YARA_SCANNER::new()
+    pub fn get_scanner_instance(&self,writer:Box<Write>)->Box<YARA_SCANNER>{
+        YARA_SCANNER::new(writer)
     }
 }
 
 impl YARA_SCANNER{
-    fn new()->Box<Self>{
+    fn new(writer:Box<Write>)->Box<Self>{
         let yara=unsafe{ffi_get_scanner()};
         let mut yara = Box::new(YARA_SCANNER{
             yara:yara,
@@ -68,6 +76,7 @@ impl YARA_SCANNER{
                 rule_file:None,
                 target_file:None,
                 scope_width:20 , //デフォルト前後20バイト抜き出す
+                out:writer,
             }
         });
         if yara.yara==std::ptr::null_mut(){
@@ -76,6 +85,7 @@ impl YARA_SCANNER{
         unsafe{(*(yara.yara)).user_data=&mut yara.user_data;}
         yara
     }
+    
     pub fn do_scanfile(&mut self,target_path:&str,scope_width:usize){
         if scope_width!=0{self.user_data.scope_width=scope_width;}
         self.user_data.target_file=Some(target_path.to_owned());
@@ -83,7 +93,6 @@ impl YARA_SCANNER{
         unsafe{
             ffi_do_scan_file(self.yara,target_path.as_ptr(),0,0);
         }
-        
     }
 
     pub fn load_rule(&mut self,path:&str)->Result<(),Box<Error>>{
@@ -105,7 +114,6 @@ impl YARA_SCANNER{
         unsafe{ffi_set_callback_match(self.yara,cb);}
     }
 }
-
 
 impl Drop for YARA{
     fn drop(&mut self){

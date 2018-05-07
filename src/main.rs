@@ -36,6 +36,12 @@ fn init<'a>()->ArgMatches<'a>{
             })
         .takes_value(true)
         .help("Specify an arbitrary number of bytes before and after display from the matching part (default 20 bytes)"))
+    .arg(Arg::with_name("redirect_file_path")
+        .long("logfile")
+        .short("l")
+        .required(false)
+        .takes_value(true)
+        .help("Specify log file path"))
     .get_matches()
 }
 
@@ -47,7 +53,14 @@ fn main() {
         }else{0};
 
     let a=YARA::new();
-    let mut a = a.get_scanner_instance();
+
+    let mut file:Box<Write>;
+    if opt.is_present("redirect_file_path"){
+        file = Box::new(File::create(opt.value_of("redirect_file_path").unwrap()).unwrap());
+    }else{
+        file = Box::new(stdout());
+    }
+    let mut a = a.get_scanner_instance(file);
     let rule_path = opt.value_of("rule_file").unwrap();
     if let Err(e) = a.load_rule(rule_path){
         eprintln!("Rule load error : \"{}\" {}",rule_path,e);
@@ -101,7 +114,7 @@ fn u8ptr_to_vec(s:*mut u8,s_len:usize)->Vec<u8>{
 
 // 一致した際に呼ばれるコールバックメソッド
 fn callback_matching(yara:*mut YARA_FFI,address:usize,datalength:usize,rule_id_string:*mut u8,ruleid_len:usize,cond_string_id_string:*mut u8,condstringid_len:usize)->libc::c_int{
-    let data = unsafe{&(*(*yara).user_data)};
+    let mut data = unsafe{&mut (*(*yara).user_data)};
     let rulefile = data.rule_file.clone().unwrap();
     let target = data.target_file.clone().unwrap();
 
@@ -110,12 +123,13 @@ fn callback_matching(yara:*mut YARA_FFI,address:usize,datalength:usize,rule_id_s
     let cond_string_id = u8ptr_to_vec(cond_string_id_string,condstringid_len);
     let cond_string_id = std::str::from_utf8(&cond_string_id).unwrap();
     
-    print_result(data,&rulefile,&target,address,datalength,rule_id,cond_string_id);
+    print_result(&mut data,&rulefile,&target,address,datalength,rule_id,cond_string_id);
     return 0;
 }
 
+use std::io::{stdout, Write, BufWriter};
 // 一致したデータの該当部分周辺と該当箇所を表示するメソッド
-fn print_result(user_data:&YARA_DATA,rule_file:&str,target_name:&str,address:usize,data_length:usize,rule_id:&str,cond_string_id:&str){
+fn print_result(user_data:&mut YARA_DATA,rule_file:&str,target_name:&str,address:usize,data_length:usize,rule_id:&str,cond_string_id:&str){
     let mut target = File::open(target_name).unwrap();
     let mut offset = 0;
     let diff;
@@ -128,27 +142,36 @@ fn print_result(user_data:&YARA_DATA,rule_file:&str,target_name:&str,address:usi
     let _=target.seek(SeekFrom::Start((offset) as u64));
     let mut buf = Vec::new();
     let _=(&target).take((user_data.scope_width*2+data_length) as u64).read_to_end(&mut buf).unwrap();
-    
-    println!("[ルールファイル: {}(ルールID : {}/{})] ===> [探索対象ファイル: {}(オフセット(開始 - 終了): 0x{:x} - 0x{:x} = {} バイトにマッチ)]",
+
+    let mut out = &mut user_data.out;
+/*
+    let out = stdout();
+    let mut out = BufWriter::new(out);
+    let mut out = File::create("out.txt").unwrap();
+*/
+    let _ = out.write(&format!("[ルールファイル: {}(ルールID : {}/{})] ===> [探索対象ファイル: {}(オフセット(開始 - 終了): 0x{:x} - 0x{:x} = {} バイトにマッチ)]\n",
     //println!("[Rule file: {} (Rule ID: {}/{})] ===> [Search target file: {} (offset (start - end): 0x {:x} - 0x {:x} = {} bytes)]",
-        rule_file,rule_id,cond_string_id,target_name,address,address+data_length,data_length);
-    print_buffer(&buf[0..diff]);
+        rule_file,rule_id,cond_string_id,target_name,address,address+data_length,data_length).as_bytes());
+    print_buffer(&buf[0..diff],&mut out);
     match ConsoleColor::new(){
         Ok(mut con)=>{
-            con.red();
-            print_buffer(&buf[diff..diff+data_length]);
-            con.reset();
+            con.red(&mut out);
+            print_buffer(&buf[diff..diff+data_length],&mut out);
+            con.reset(&mut out);
         },
-        Err(_)=>{print_buffer(&buf[diff..diff+data_length]);}
+        Err(_)=>{print_buffer(&buf[diff..diff+data_length],&mut out);}
     }
-    print_buffer(&buf[diff+data_length..buf.len()]);
-    println!("\n---------------------------------------------------");
+    
+    print_buffer(&buf[diff+data_length..buf.len()],&mut out);
+    let _ = out.write(b"\n---------------------------------------------------\n");
 }
 
 // バッファを出力するラッパメソッド
-fn print_buffer(buf:&[u8]){
-    match std::str::from_utf8(buf){
-        Ok(s)=>print!("{}",s.replace("\r","\\r").replace("\n","\\n")),
+fn print_buffer(buf:&[u8],out:&mut std::io::Write){
+    let _ = match std::str::from_utf8(buf){
+        Ok(s)=>{
+            let _= out.write(&format!("{}",s.replace("\r","\\r").replace("\n","\\n")).as_bytes());
+        },
         Err(_)=>{
             let mut s = String::new();
             for n in buf{
@@ -158,7 +181,7 @@ fn print_buffer(buf:&[u8]){
                     s.push_str(&format!("\\x{:x}",n));
                 }
             }
-            print!("{}",s);
+            let _= out.write(s.as_bytes());
         }
-    }
+    };
 }

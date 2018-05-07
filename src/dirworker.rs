@@ -17,7 +17,6 @@ pub struct DirectoryWalker{
 impl DirectoryWalker{
     pub fn new(root_dir:&str)->io::Result<DirectoryWalker>{
         let mut dir_list = Vec::<DirectoryInfo>::new();
-        // アクセス権限は、上位ディレクトリのものを継承する。
         dir_list.push(DirectoryInfo{path:root_dir.to_owned()});
         let dw = DirectoryWalker{
             dir_list:dir_list,
@@ -33,14 +32,10 @@ impl DirectoryWalker{
         for entry in fs::read_dir(dir)?{
             let entry = entry?;
             if entry.path().is_dir() {
-                // ファイルの可視性を仮想的に実装する。
-                // パーミッションの継承を行う。
+                // ディレクトリの場合は、ディレクトリリストに保存
                 self.dir_list.push(DirectoryInfo{path:entry.path().into_os_string().into_string().unwrap()});
             }else{
-                // self : 現在のディレクトリのパーミッションと検索開始ディレクトリのパーミッション
-                // entry : ファイルの情報（パスとファイルシステムから取得できるパーミッション）
-                // parent : 親ディレクトリ（パスと論理パーミッション（継承されたもの））
-                //cb_file(&self,entry,parent)?;
+                // メソッドの戻り値としてファイルリストを構築
                 filelist.push(entry.path());
             }
         }
