@@ -141,3 +141,7 @@ void ffi_set_callback_match(YARA_FFI* yara,void* cb){
 void ffi_finalize_thread(){
     yr_finalize_thread();
 }
+
+size_t ffi_maxthreads(){
+    return MAX_THREADS;
+}

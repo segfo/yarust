@@ -9,10 +9,17 @@ use std::io::prelude::*;
 use std::io::SeekFrom;
 mod console;
 use console::*;
-mod dirworker;
-use dirworker::*;
+mod dirwalker;
+use dirwalker::*;
+extern crate num_cpus;
 
 fn init<'a>()->ArgMatches<'a>{
+    let num_validator=|s:String|if s.parse::<usize>().is_ok()==false{
+            Err(format!("\"{}\" is Invalid number(parse error)",s).to_owned())
+        }else{
+            Ok(())
+        };
+
     app_from_crate!()
     .arg(Arg::with_name("search_path")
         .long("path")
@@ -29,11 +36,7 @@ fn init<'a>()->ArgMatches<'a>{
     .arg(Arg::with_name("scope_width")
         .long("width")
         .short("w")
-        .validator(|s|if s.parse::<usize>().is_ok()==false{
-                Err(format!("\"{}\" is Invalid number(parse error)",s).to_owned())
-            }else{
-                Ok(())
-            })
+        .validator(num_validator)
         .takes_value(true)
         .help("Specify an arbitrary number of bytes before and after display from the matching part (default 20 bytes)"))
     .arg(Arg::with_name("redirect_file_path")
@@ -42,31 +45,49 @@ fn init<'a>()->ArgMatches<'a>{
         .required(false)
         .takes_value(true)
         .help("Specify log file path"))
+    .arg(Arg::with_name("threads_count")
+        .long("threads")
+        .short("t")
+        .required(false)
+        .validator(num_validator)
+        .takes_value(true)
+        .help("Specify the count of threads"))
     .get_matches()
 }
 
+use std::sync::{Arc, Mutex};
+use std::thread;
+
 fn main() {
     let opt = init();
-    let scope_width = 
-        if opt.is_present("scope_width"){
-            opt.value_of("scope_width").unwrap().parse().unwrap()
-        }else{0};
+    let yara=YARA::new();
 
-    let a=YARA::new();
+    let max_threads = match opt.value_of("threads_count"){
+        Some(t)=>t.parse::<usize>().unwrap(),
+        None=>if yara.get_maxthreads()>num_cpus::get()*2{num_cpus::get()*2}else{yara.get_maxthreads()}
+    };
+    let mut scanners = Vec::new();
+    let file:Arc<Mutex<Box<Write+Send>>>;
+    let logmode=opt.is_present("redirect_file_path");
 
-    let mut file:Box<Write>;
-    if opt.is_present("redirect_file_path"){
-        file = Box::new(File::create(opt.value_of("redirect_file_path").unwrap()).unwrap());
+    if logmode{
+        file = Arc::new(Mutex::new(Box::new(File::create(opt.value_of("redirect_file_path").unwrap()).unwrap())));
     }else{
-        file = Box::new(stdout());
+        file = Arc::new(Mutex::new(Box::new(stdout())));
+
     }
-    let mut a = a.get_scanner_instance(file);
-    let rule_path = opt.value_of("rule_file").unwrap();
-    if let Err(e) = a.load_rule(rule_path){
-        eprintln!("Rule load error : \"{}\" {}",rule_path,e);
-        return;
+    for _ in 0..max_threads{
+        let mut scanner = Arc::new(Mutex::new(yara.get_scanner_instance(file.clone())));
+        let rule_path = opt.value_of("rule_file").unwrap();
+        if let Err(e) = scanner.lock().unwrap().load_rule(rule_path){
+            eprintln!("Rule load error : \"{}\" {}",rule_path,e);
+            return;
+        }
+        scanner.lock().unwrap().set_callback_match(callback_matching);
+        if logmode{scanner.lock().unwrap().set_coloring(false);}
+        scanners.push(scanner);
     }
-    a.set_callback_match(callback_matching);
+    let scanner=&scanners[0];
 
     // スキャンの準備（基本はディレクトリ単位で行う）
     let search_path = opt.value_of("search_path").unwrap();
@@ -90,15 +111,37 @@ fn main() {
         match walker.dir_walk(&dir,&mut path){
             Ok(_)=>{},
             Err(e)=>{
-                a.do_scanfile(&dir.path,scope_width);
+                scanner.lock().unwrap().do_scanfile(&dir.path);
                 return;
             }
         };
         if walker.dir_list.len()==0{break;}
     }
+    let mut th_list = Vec::new();
+    
     // ディレクトリ配下にあるファイルをすべてスキャンする
+    let mut i =0;
     for p in path{
-        a.do_scanfile(p.to_str().unwrap(),scope_width);
+        let p=p.clone();
+        let scanner=scanners[i].clone();
+        i+=1;
+        let th = thread::spawn(move || {
+            let mut scanner=scanner.lock().unwrap();
+            if logmode{
+                println!("{} scanning...",p.to_str().unwrap());
+            }
+            scanner.do_scanfile(p.to_str().unwrap());
+            scanner.finalize_thread();
+        });
+        th_list.push(th);
+        if th_list.len()>=scanners.len(){
+            loop{
+                let th = th_list.pop().unwrap();
+                let _ = th.join();
+                i-=1;
+                if th_list.len()==0{break;}
+            }
+        }
     }
 }
 
@@ -130,6 +173,8 @@ fn callback_matching(yara:*mut YARA_FFI,address:usize,datalength:usize,rule_id_s
 use std::io::{stdout, Write, BufWriter};
 // 一致したデータの該当部分周辺と該当箇所を表示するメソッド
 fn print_result(user_data:&mut YARA_DATA,rule_file:&str,target_name:&str,address:usize,data_length:usize,rule_id:&str,cond_string_id:&str){
+    let mut out = &mut user_data.out.lock().unwrap();
+
     let mut target = File::open(target_name).unwrap();
     let mut offset = 0;
     let diff;
@@ -143,7 +188,6 @@ fn print_result(user_data:&mut YARA_DATA,rule_file:&str,target_name:&str,address
     let mut buf = Vec::new();
     let _=(&target).take((user_data.scope_width*2+data_length) as u64).read_to_end(&mut buf).unwrap();
 
-    let mut out = &mut user_data.out;
 /*
     let out = stdout();
     let mut out = BufWriter::new(out);
@@ -153,21 +197,23 @@ fn print_result(user_data:&mut YARA_DATA,rule_file:&str,target_name:&str,address
     //println!("[Rule file: {} (Rule ID: {}/{})] ===> [Search target file: {} (offset (start - end): 0x {:x} - 0x {:x} = {} bytes)]",
         rule_file,rule_id,cond_string_id,target_name,address,address+data_length,data_length).as_bytes());
     print_buffer(&buf[0..diff],&mut out);
-    match ConsoleColor::new(){
-        Ok(mut con)=>{
-            con.red(&mut out);
-            print_buffer(&buf[diff..diff+data_length],&mut out);
-            con.reset(&mut out);
-        },
-        Err(_)=>{print_buffer(&buf[diff..diff+data_length],&mut out);}
+
+    let con = ConsoleColor::new();
+    if con.is_ok()&&user_data.coloring{
+        let mut con = con.unwrap();
+        con.red(&mut out);
+        print_buffer(&buf[diff..diff+data_length],&mut out);
+        con.reset(&mut out);
+    }else{
+        print_buffer(&buf[diff..diff+data_length],&mut out);
     }
-    
+
     print_buffer(&buf[diff+data_length..buf.len()],&mut out);
     let _ = out.write(b"\n---------------------------------------------------\n");
 }
 
 // バッファを出力するラッパメソッド
-fn print_buffer(buf:&[u8],out:&mut std::io::Write){
+fn print_buffer(buf:&[u8],out:&mut (std::sync::MutexGuard<Box<std::io::Write+Send>>)){
     let _ = match std::str::from_utf8(buf){
         Ok(s)=>{
             let _= out.write(&format!("{}",s.replace("\r","\\r").replace("\n","\\n")).as_bytes());
