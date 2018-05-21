@@ -1,4 +1,3 @@
-use std::fs::DirEntry;
 use std::io;
 use std::fs;
 use std::path::*;
@@ -27,7 +26,6 @@ impl DirectoryWalker{
     }
     
     pub fn dir_walk(&mut self,dir:&DirectoryInfo,filelist:&mut Vec<PathBuf>) -> io::Result<()> {
-        let parent=dir;
         let dir=Path::new(&dir.path);
         for entry in fs::read_dir(dir)?{
             let entry = entry?;

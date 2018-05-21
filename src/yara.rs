@@ -1,3 +1,6 @@
+// YARA_FFIはYARA_DATA内に持つrule_fileなどのRust関連の型がFFI-unsafeなので警告を出す
+// C側ではそれをいじることは一切行わないので、それを無視する。いじりさえしなければ安全。
+#![allow(improper_ctypes)]
 use std;
 use libc;
 use libc::*;

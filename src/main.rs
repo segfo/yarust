@@ -76,6 +76,9 @@ fn main() {
         file = Arc::new(Mutex::new(Box::new(stdout())));
 
     }
+
+    let scope_width:usize = opt.value_of("scope_width").unwrap_or("0").parse::<usize>().unwrap();
+
     for _ in 0..max_threads{
         let mut scanner = Arc::new(Mutex::new(yara.get_scanner_instance(file.clone())));
         let rule_path = opt.value_of("rule_file").unwrap();
@@ -84,6 +87,7 @@ fn main() {
             return;
         }
         scanner.lock().unwrap().set_callback_match(callback_matching);
+        scanner.lock().unwrap().set_scope_width(scope_width);
         if logmode{scanner.lock().unwrap().set_coloring(false);}
         scanners.push(scanner);
     }
@@ -110,7 +114,7 @@ fn main() {
         // 単一ファイルをとりあえずスキャンして終わる
         match walker.dir_walk(&dir,&mut path){
             Ok(_)=>{},
-            Err(e)=>{
+            Err(_)=>{
                 scanner.lock().unwrap().do_scanfile(&dir.path);
                 return;
             }
@@ -170,7 +174,7 @@ fn callback_matching(yara:*mut YARA_FFI,address:usize,datalength:usize,rule_id_s
     return 0;
 }
 
-use std::io::{stdout, Write, BufWriter};
+use std::io::{stdout, Write};
 // 一致したデータの該当部分周辺と該当箇所を表示するメソッド
 fn print_result(user_data:&mut YARA_DATA,rule_file:&str,target_name:&str,address:usize,data_length:usize,rule_id:&str,cond_string_id:&str){
     let mut out = &mut user_data.out.lock().unwrap();

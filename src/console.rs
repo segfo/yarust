@@ -1,5 +1,4 @@
 extern crate wincolor;
-use std;
 use std::io::Write;
 use self::wincolor::{Console, Color, Intense};
 use std::error::Error;
