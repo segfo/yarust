@@ -124,11 +124,11 @@ fn main() {
     let mut th_list = Vec::new();
     
     // ディレクトリ配下にあるファイルをすべてスキャンする
-    let mut i =0;
+    let mut use_scanners = 0;
     for p in path{
         let p=p.clone();
-        let scanner=scanners[i].clone();
-        i+=1;
+        let scanner=scanners[use_scanners].clone();
+        use_scanners+=1;
         let th = thread::spawn(move || {
             let mut scanner=scanner.lock().unwrap();
             if logmode{
@@ -138,15 +138,25 @@ fn main() {
             scanner.finalize_thread();
         });
         th_list.push(th);
+        // ループ中にスレッドの最大数を上回らないように調整するWait
         if th_list.len()>=scanners.len(){
-            loop{
-                let th = th_list.pop().unwrap();
-                let _ = th.join();
-                i-=1;
-                if th_list.len()==0{break;}
-            }
+            join_wait(&mut th_list,&mut use_scanners);
         }
     }
+    // スレッド数が最大数未満のとき、スレッドの終了を待つWait
+    // スレッド数が最大数と同一の場合は、何もしない
+    join_wait(&mut th_list,&mut use_scanners);
+}
+
+fn join_wait(th_list:&mut Vec<std::thread::JoinHandle<()>>,use_scanners:&mut usize){
+    if *use_scanners>0{
+        for _ in (0..*use_scanners){
+            let th = th_list.pop().unwrap();
+            let _ = th.join();
+            if th_list.len()==0{break;}
+        }
+    }
+    *use_scanners=0;
 }
 
 fn u8ptr_to_vec(s:*mut u8,s_len:usize)->Vec<u8>{

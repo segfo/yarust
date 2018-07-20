@@ -18,7 +18,7 @@
 
 # 日本語ヘルプ
 ```
-yarust 2.0.0
+yarust 2.1.0
 segfo <k.segfo@gmail.com>
 
 
@@ -39,7 +39,7 @@ OPTIONS:
 
 # Google翻訳した英語ヘルプ
 ```
-yarust 2.0.0
+yarust 2.1.0
 segfo <k.segfo@gmail.com>
 
 
