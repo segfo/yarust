@@ -131,7 +131,12 @@ impl YARA_SCANNER{
         if state!=0{
             return Err(Box::new(std::io::Error::new(std::io::ErrorKind::InvalidData, "Invalid file.")));
         }
-        unsafe{(*(*(self.yara.0.as_ptr())).user_data).rule_file=Some(path.to_owned());}
+        unsafe{
+            if libc::fclose(fp) != 0{
+                return Err(Box::new(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "fclose(3) failed.")));
+            }
+            (*(*(self.yara.0.as_ptr())).user_data).rule_file=Some(path.to_owned());
+        }
         Ok(())
     }
 

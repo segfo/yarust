@@ -1,86 +1,68 @@
 extern crate libc;
 extern crate clap;
-use clap::*;
+extern crate num_cpus;
 mod yara;
 use yara::*;
-use std::path::*;
-use std::fs::File;
-use std::io::prelude::*;
-use std::io::SeekFrom;
+use std::{
+    io::{SeekFrom, prelude::*},
+    path::*,
+    fs::File,
+    sync::{Arc, Mutex},
+    thread,collections::HashMap,
+    sync::{mpsc,mpsc::{Sender, Receiver}}
+};
 mod console;
 use console::*;
 mod dirwalker;
 use dirwalker::*;
-extern crate num_cpus;
-
-fn init<'a>()->ArgMatches<'a>{
-    let num_validator=|s:String|if s.parse::<usize>().is_ok()==false{
-            Err(format!("\"{}\" is Invalid number(parse error)",s).to_owned())
-        }else{
-            Ok(())
-        };
-
-    app_from_crate!()
-    .arg(Arg::with_name("search_path")
-        .long("path")
-        .short("p")
-        .required(true)
-        .takes_value(true)
-        .help("Specify the path of the search target file or directory"))
-    .arg(Arg::with_name("rule_file")
-        .long("rule")
-        .short("r")
-        .required(true)
-        .takes_value(true)
-        .help("Specify file path of YARA rule"))
-    .arg(Arg::with_name("scope_width")
-        .long("width")
-        .short("w")
-        .validator(num_validator)
-        .takes_value(true)
-        .help("Specify an arbitrary number of bytes before and after display from the matching part (default 20 bytes)"))
-    .arg(Arg::with_name("redirect_file_path")
-        .long("logfile")
-        .short("l")
-        .required(false)
-        .takes_value(true)
-        .help("Specify log file path"))
-    .arg(Arg::with_name("threads_count")
-        .long("threads")
-        .short("t")
-        .required(false)
-        .validator(num_validator)
-        .takes_value(true)
-        .help("Specify the count of threads"))
-    .get_matches()
-}
-
-use std::sync::{Arc, Mutex};
-use std::thread;
+mod resource_pool;
+use resource_pool::ResourceAllocator;
+mod startup;
+use startup::init;
 
 fn main() {
     let opt = init();
-    let yara=YARA::new();
+    // スキャン結果を格納するファイル
+    let scan_result_file:Arc<Mutex<Box<Write+Send>>>;
+    let logmode=opt.is_present("redirect_file_path");
 
+    if logmode{
+        scan_result_file = Arc::new(Mutex::new(Box::new(File::create(opt.value_of("redirect_file_path").unwrap()).unwrap())));
+    }else{
+        scan_result_file = Arc::new(Mutex::new(Box::new(stdout())));
+    }
+
+    // スキャンの準備（基本はディレクトリ単位で行う）
+    eprintln!("directory scanning...");
+    let search_path = opt.value_of("search_path").unwrap();
+    if Path::new(search_path).exists() == false{
+        eprintln!("\"{}\" is not exists",search_path);
+        return;
+    }
+
+    let mut walker = match DirectoryWalker::new(search_path){
+        Ok(walker)=>walker,
+        Err(e)=>{
+            eprintln!("walker generate fail : {}",e);
+            return;
+        }
+    };
+
+    // YARAインスタンスの準備
+    eprintln!("scanner instance generating...");
+    let yara=YARA::new();
     let max_threads = match opt.value_of("threads_count"){
         Some(t)=>t.parse::<usize>().unwrap(),
         None=>if yara.get_maxthreads()>num_cpus::get()*2{num_cpus::get()*2}else{yara.get_maxthreads()}
     };
-    let mut scanners = Vec::new();
-    let file:Arc<Mutex<Box<Write+Send>>>;
-    let logmode=opt.is_present("redirect_file_path");
 
-    if logmode{
-        file = Arc::new(Mutex::new(Box::new(File::create(opt.value_of("redirect_file_path").unwrap()).unwrap())));
-    }else{
-        file = Arc::new(Mutex::new(Box::new(stdout())));
-
-    }
-
+    // スキャナのインスタンスを同時実行スレッド分生成し、ルールをロード・コンパイルする。
+    // そのスキャナインスタンスをすべて、リソースプールに登録しておく。
+    // 使用側は、リソースプールからここで準備したスキャナを取得する。
+    let mut scanner_pool = ResourceAllocator::<PathBuf,std::sync::Arc<std::sync::Mutex<std::boxed::Box<yara::YARA_SCANNER>>>>::new();
     let scope_width:usize = opt.value_of("scope_width").unwrap_or("0").parse::<usize>().unwrap();
-
     for _ in 0..max_threads{
-        let mut scanner = Arc::new(Mutex::new(yara.get_scanner_instance(file.clone())));
+        let scanner = Arc::new(Mutex::new(yara.get_scanner_instance(scan_result_file.clone())));
         let rule_path = opt.value_of("rule_file").unwrap();
         if let Err(e) = scanner.lock().unwrap().load_rule(rule_path){
             eprintln!("Rule load error : \"{}\" {}",rule_path,e);
@@ -89,24 +71,10 @@ fn main() {
         scanner.lock().unwrap().set_callback_match(callback_matching);
         scanner.lock().unwrap().set_scope_width(scope_width);
         if logmode{scanner.lock().unwrap().set_coloring(false);}
-        scanners.push(scanner);
+        scanner_pool.register_resource_pool(scanner);
     }
-    let scanner=&scanners[0];
-
-    // スキャンの準備（基本はディレクトリ単位で行う）
-    let search_path = opt.value_of("search_path").unwrap();
-    if Path::new(search_path).exists() == false{
-        eprintln!("\"{}\" is not exists",search_path);
-        return;
-    }
-    let mut walker = match DirectoryWalker::new(search_path){
-        Ok(walker)=>walker,
-        Err(e)=>{
-            println!("walker generate fail : {}",e);
-            return;
-        }
-    };
-    // サーチしたパスを格納するバッファを用意する
+    eprintln!("scanning...");
+    // ディレクトリの走査を行う。（再帰的に行う）
     let mut path = Vec::<PathBuf>::new();
     loop{
         let dir=walker.dir_list.pop().unwrap();
@@ -115,48 +83,60 @@ fn main() {
         match walker.dir_walk(&dir,&mut path){
             Ok(_)=>{},
             Err(_)=>{
+                let scanner=scanner_pool.get(PathBuf::from(dir.path.clone())).unwrap();
                 scanner.lock().unwrap().do_scanfile(&dir.path);
                 return;
             }
         };
         if walker.dir_list.len()==0{break;}
     }
-    let mut th_list = Vec::new();
-    
+
+    // ここからスキャンを実施する。
+    // スレッドリストを格納するハッシュマップを用意する。
+    // スレッドが完了したらこのマップから削除する。
+    let mut th_list = HashMap::new();
     // ディレクトリ配下にあるファイルをすべてスキャンする
-    let mut use_scanners = 0;
-    for p in path{
-        let p=p.clone();
-        let scanner=scanners[use_scanners].clone();
-        use_scanners+=1;
+    let (tx, rx): (Sender<(thread::ThreadId,PathBuf)>, Receiver<(thread::ThreadId,PathBuf)>) = mpsc::channel();
+    for p in path.clone(){
+        let p = p.clone();
+        // スキャナをプールから取得し、Arcの参照カウントを増やす（クローン）
+        let scanner = scanner_pool.get(p.clone()).unwrap().clone();
+        let tx = tx.clone();
+        // スレッドを生成する。
         let th = thread::spawn(move || {
-            let mut scanner=scanner.lock().unwrap();
+            let mut scanner = scanner.lock().unwrap();
             if logmode{
                 println!("{} scanning...",p.to_str().unwrap());
             }
             scanner.do_scanfile(p.to_str().unwrap());
             scanner.finalize_thread();
+            // メインループにメッセージ送信。
+            tx.send((thread::current().id(),p.clone())).unwrap();
         });
-        th_list.push(th);
-        // ループ中にスレッドの最大数を上回らないように調整するWait
-        if th_list.len()>=scanners.len(){
-            join_wait(&mut th_list,&mut use_scanners);
+        th_list.insert(th.thread().id(),th);
+        // ループ中にスキャナプールの最大数を上回らないように調整するWait
+        // スレッドが終了したら、当該スレッドのスキャナを返却して、新たなスレッドを生成する。
+        if th_list.len()>=max_threads{
+            let (tid,filename) = rx.recv().unwrap();
+            let filename = filename.to_path_buf().clone();
+            scanner_pool.free(filename.clone());
+            th_list.remove(&tid);
+            if logmode{
+                println!("done : {}",filename.to_str().unwrap());
+            }
         }
     }
     // スレッド数が最大数未満のとき、スレッドの終了を待つWait
     // スレッド数が最大数と同一の場合は、何もしない
-    join_wait(&mut th_list,&mut use_scanners);
-}
-
-fn join_wait(th_list:&mut Vec<std::thread::JoinHandle<()>>,use_scanners:&mut usize){
-    if *use_scanners>0{
-        for _ in (0..*use_scanners){
-            let th = th_list.pop().unwrap();
-            let _ = th.join();
-            if th_list.len()==0{break;}
+    for _ in 0..th_list.len(){
+        let (_,filename) = rx.recv().unwrap();
+        scanner_pool.free(filename.clone());
+        if logmode{
+            println!("done : {}",filename.to_str().unwrap());
         }
     }
-    *use_scanners=0;
+    eprintln!("scan total : {} files",path.len());
+    eprintln!("finalizing...");
 }
 
 fn u8ptr_to_vec(s:*mut u8,s_len:usize)->Vec<u8>{
